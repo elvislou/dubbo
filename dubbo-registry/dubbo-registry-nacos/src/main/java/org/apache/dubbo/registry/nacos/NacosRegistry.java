@@ -17,6 +17,7 @@
 package org.apache.dubbo.registry.nacos;
 
 
+import com.alibaba.nacos.client.naming.NacosNamingService;
 import org.apache.dubbo.common.URL;
 import org.apache.dubbo.common.URLBuilder;
 import org.apache.dubbo.common.utils.StringUtils;
@@ -498,8 +499,12 @@ public class NacosRegistry extends FailbackRegistry {
         EventListener eventListener = event -> {
             if (event instanceof NamingEvent) {
                 NamingEvent e = (NamingEvent) event;
-                List<Instance> instances = e.getInstances();
 
+                if (ignoreEvent(namingService, e)) {
+                    return;
+                }
+
+                List<Instance> instances = e.getInstances();
 
                 if (isServiceNamesWithCompatibleMode(url)) {
 
@@ -515,6 +520,31 @@ public class NacosRegistry extends FailbackRegistry {
         namingService.subscribe(serviceName,
                 getUrl().getParameter(GROUP_KEY, Constants.DEFAULT_GROUP),
                 eventListener);
+    }
+
+    /**
+     * https://github.com/apache/dubbo/issues/8838
+     * 解决上述链接中的dubbo面对双nacos注册中心时的服务覆盖问题
+     * 当收到一个nacos的通知事件时，如果不是本注册中心的事件，则忽略不处理
+     * 是否本注册中心的事件，通过serverProxy中的nacos domain判断
+     *
+     * @return
+     */
+    private boolean ignoreEvent(NacosNamingServiceWrapper nacosNamingServiceWrapper, NamingEvent namingEvent) {
+        if (namingService == null || namingEvent == null) {
+            return false;
+        }
+        NamingService namingService = nacosNamingServiceWrapper.getNamingService();
+        if (namingService == null || !(namingService instanceof NacosNamingService)) {
+            return false;
+        }
+        NacosNamingService nacosNamingService = (NacosNamingService)namingService;
+        String registryNacosDomain = nacosNamingService.getNacosDomain();
+        String eventNacosDomain = namingEvent.getNacosDomain();
+        if (registryNacosDomain == null || eventNacosDomain == null) {
+            return false;
+        }
+        return !registryNacosDomain.equals(eventNacosDomain);
     }
 
     /**
